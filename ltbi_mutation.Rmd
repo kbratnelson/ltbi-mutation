@@ -1,0 +1,353 @@
+---
+title: "ltbi-mutation"
+output: html_document
+---
+
+
+First we need to load some necessary packages.
+```{r}
+pacman::p_load(tidyverse, rmarkdown, lubridate, epitools, gridExtra, knitr, kableExtra, ggsn, here, rgeos, ggthemes, grid, cowplot, ggpubr, wesanderson)
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+#cdc_pairs <- read.csv(here("Data/CasepairData_forKristin.csv"))
+
+# NEW DATA as of 1/14/20
+cdc_pairs_new <- read.csv(here::here("Data/DataforKristin20191213.csv"))
+
+```
+
+
+```{r}
+# NEW DATA
+
+cdc_pairs_new$samplecoll_interval <- as.numeric(as.character(cdc_pairs_new$samplecoll_interval))
+
+cdc_pairs_new <- as.data.frame(cdc_pairs_new)
+
+
+cdc_pairs_new$lessyr[cdc_pairs_new$IPmidtosample_interval < 365] <- 1
+cdc_pairs_new$lessyr[cdc_pairs_new$IPmidtosample_interval >= 365] <- 0
+
+cdc_pairs_new$less2yr[cdc_pairs_new$IPmidtosample_interval < 730] <- 0 #flip these on 05/05/20
+cdc_pairs_new$less2yr[cdc_pairs_new$IPmidtosample_interval >= 730] <- 1
+
+cdc_pairs_new$less3yr[cdc_pairs_new$IPmidtosample_interval < 1095] <- 1
+cdc_pairs_new$less3yr[cdc_pairs_new$IPmidtosample_interval >= 1095] <- 0
+
+cdc_pairs_new$less5snp[cdc_pairs_new$SNP.distance < 5] <- 1
+cdc_pairs_new$less5snp[cdc_pairs_new$SNP.distance >= 5] <- 0
+
+cdc_pairs_new$less5snp <- as.factor(cdc_pairs_new$less5snp)
+cdc_pairs_new$lessyr <- as.factor(cdc_pairs_new$lessyr)
+cdc_pairs_new$less2yr <- as.factor(cdc_pairs_new$less2yr)
+cdc_pairs_new$less3yr <- as.factor(cdc_pairs_new$less3yr)
+
+# SET NEGATIVE INFECITOUS PERIODS TO ZERO
+cdc_pairs_new$IPmidtosample_interval[cdc_pairs_new$IPmidtosample_interval < 0] <- 0
+cdc_pairs_new$samplecoll_interval[cdc_pairs_new$samplecoll_interval < 0] <- 0
+
+# REMOVE PAIRS WITH SNP DISTANCE > 10
+cdc_pairs_new <- cdc_pairs_new[cdc_pairs_new$SNP.distance <= 10,] 
+
+# CREATE TRANSMISSION INTERVAL (MODIFIED CASE-PAIR INTERVAL) IN YEARS
+cdc_pairs_new$IPmidtosample_interval.y <- cdc_pairs_new$IPmidtosample_interval/365
+cdc_pairs_new$samplecoll_interval.y <- cdc_pairs_new$samplecoll_interval/365
+
+
+library(plyr)
+library(dplyr)
+plyr::ddply(cdc_pairs_new, ~less2yr, summarise, mean = mean(SNP.distance), 
+                                                Median=(median(SNP.distance)), 
+                                                q25 = quantile(SNP.distance, probs = 0.25, na.rm = TRUE), 
+                                                q75 = quantile(SNP.distance, probs = 0.75, na.rm = TRUE))
+
+#run a linear regression
+lr <- lm(SNP.distance ~ samplecoll_interval, data = cdc_pairs_new)
+#coef(lr)
+
+#head(cdc_pairs)
+
+# SNP distance
+cdc_pairs_new %>%
+summarise(min = min(SNP.distance, na.rm = TRUE),
+          med = median(SNP.distance, na.rm = TRUE), 
+          q25 = quantile(SNP.distance, probs = 0.25, na.rm = TRUE), 
+          q75 = quantile(SNP.distance, probs = 0.75, na.rm = TRUE),
+          max = max(SNP.distance, na.rm = TRUE))
+
+# TRANSMISSION (MODIFIED CASE-PAIR) INTERVAL
+cdc_pairs_new %>%
+summarise(min = min(IPmidtosample_interval, na.rm = TRUE),
+          med = median(IPmidtosample_interval, na.rm = TRUE), 
+          q25 = quantile(IPmidtosample_interval, probs = 0.25, na.rm = TRUE), 
+          q75 = quantile(IPmidtosample_interval, probs = 0.75, na.rm = TRUE),
+          max = max(IPmidtosample_interval, na.rm = TRUE))
+
+# minimum: -28 days or -1 month
+# q25 : 81 days or 3 months
+# median: 356 days or 11.7 months
+# q75 : 
+# maximum: 5502 days or 15.1 years
+
+# CASE-PAIR INTERVAL
+cdc_pairs_new %>%
+summarise(min = min(samplecoll_interval, na.rm = TRUE),
+          med = median(samplecoll_interval, na.rm = TRUE), 
+          q25 = quantile(samplecoll_interval, probs = 0.25, na.rm = TRUE), 
+          q75 = quantile(samplecoll_interval, probs = 0.75, na.rm = TRUE),
+          max = max(samplecoll_interval, na.rm = TRUE))
+
+# minimum: -136 days or -4.5 months
+# q25 : 21 days or 1 month
+# median: 230 days or 7.6 months 
+# q75 : 835 days or 27.5 months
+# maximum: 5426 days or 14.9 years
+
+cdc_pairs_new %>%
+filter(less2yr==1)
+          
+#####################
+# AP FIGURE 1 - HISTO
+#####################
+
+d.int <- ggplot(data = cdc_pairs_new, mapping = aes(x = samplecoll_interval.y)) +
+         geom_histogram(position="identity", color = "#E69F00", fill = "#E69F00", alpha=0.5) +
+  scale_y_continuous(breaks=seq(0, 20, 5), limits = c(0,25)) +
+  xlab("Interval, years") +
+  ylab("Count") +
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid')) +
+  ggtitle("Case Pair Intervals") 
+  
+
+  
+t.int <- ggplot(data = cdc_pairs_new, mapping = aes(x = IPmidtosample_interval.y)) +
+         geom_histogram(position="identity", color = "#999999", fill = "#999999", alpha=0.5) +
+  scale_y_continuous(breaks=seq(0, 20, 5), limits = c(0,25)) +
+  xlab("Interval, years") +
+  ylab("Count") +
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid')) +
+  ggtitle("Modified Case Pair Intervals") 
+
+
+diff <- ggplot(data = cdc_pairs_new, mapping = aes(x = "", y = IPmidtosample_interval-samplecoll_interval)) +
+  geom_boxplot(width=0.3, outlier.shape = NA) +
+  geom_jitter(position=position_jitter(0.05), color = "#E7B800", alpha = 0.8) +
+  ylab("Difference between case-pair\nand modified case-pair interval, in days") +
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.title.x=element_blank(), 
+        axis.text.x=element_blank(),
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid')) +
+  ggtitle("Difference") 
+
+
+
+plots.all <- ggarrange(d.int, t.int, diff, ncol=2, nrow=2,  labels = c("A", "B", "C"))
+
+
+#plots.all <- annotate_figure(plots.all, left = text_grob("Count", color = "black", rot = 90),
+#                       bottom = text_grob("Interval, years", color = "black"))
+
+ggsave(plots.all, file='apfig2.pdf', width = 8, height = 8, units = "in",  dpi = 300)
+
+```
+
+```{r}
+# NEW DATA
+linear.model <- lm(cdc_pairs_new$SNP.distance ~ cdc_pairs_new$IPmidtosample_interval)
+quadratic.model <- lm(cdc_pairs_new$SNP.distance ~ cdc_pairs_new$IPmidtosample_interval + (cdc_pairs_new$IPmidtosample_interval)^2)
+sqrt.model <- lm(cdc_pairs_new$SNP.distance ~ sqrt(cdc_pairs_new$IPmidtosample_interval))
+
+summ.lin <- summary(linear.model)
+summ.quad <- summary(quadratic.model)
+summ.sqrt <- summary(sqrt.model)
+
+#####################
+# AP FIGURE 2
+#####################
+
+library(ggplot2)
+lin <- ggplot(data = cdc_pairs_new, mapping = aes(x = IPmidtosample_interval.y, y = SNP.distance)) +
+  geom_point(color = "#E7B800", size = 1) +
+  #xlab("Transmission interval, days") +
+  #ylab("Pairwise SNP difference") +
+  geom_smooth(method = "lm", colour="black") +
+  annotate("text", x=10, y=11, label= paste("R-squared=", (round(summ.lin$r.squared, 3)))) +
+  coord_cartesian(xlim=c(0, 16), ylim=c(0, 14)) + 
+  scale_x_continuous(breaks=seq(0, 16, 2)) + 
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid')) +
+  ggtitle("Linear") 
+  
+
+
+
+sqrt <- ggplot(data = cdc_pairs_new, mapping = aes(x = IPmidtosample_interval.y, y = SNP.distance)) +
+  geom_point(color = "#E7B800", size = 1) +
+  #xlab("Transmission interval, days") +
+  #ylab("Pairwise SNP difference") +
+  stat_smooth(aes(y = SNP.distance),method = "lm", formula = y ~ I(sqrt(x)), size = 1, colour="black") +
+  annotate("text", x=10, y=11, label= paste("R-squared=", (round(summ.sqrt$r.squared, 3)))) +
+  coord_cartesian(xlim=c(0, 16), ylim=c(0, 14)) + 
+  scale_x_continuous(breaks=seq(0, 16, 2)) + 
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid'))
+
+  #ggtitle("Square root") 
+
+quad <- ggplot(data = cdc_pairs_new, mapping = aes(x = IPmidtosample_interval.y, y = SNP.distance)) +
+  geom_point(color = "#E7B800", size = 1) +
+  #xlab("Transmission interval, days") +
+  #ylab("Pairwise SNP difference") +
+  coord_cartesian(xlim=c(0, 16), ylim=c(0, 14)) + 
+  scale_x_continuous(breaks=seq(0, 16, 2)) + 
+  stat_smooth(aes(y = SNP.distance),method = "lm", formula = y ~ x + I(x^2), size = 1, colour="black") +
+  annotate("text", x=10, y=11, label= paste("R-squared=", (round(summ.quad$r.squared, 3)))) +
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid'))
+  #ggtitle("Quadratic") 
+
+
+# Segmented function
+k <- 274 # 2 years = recent transmission
+
+lhs <- function(x) ifelse(x < k,k-x,0)
+rhs <- function(x) ifelse(x < k,0,x-k)
+piecewiselin.model <- lm(cdc_pairs_new$SNP.distance ~ lhs(cdc_pairs_new$IPmidtosample_interval) + rhs(cdc_pairs_new$IPmidtosample_interval))
+
+summ.piecelin <- summary(piecewiselin.model)
+pred.piece <- predict.lm(piecewiselin.model, interval = "confidence")
+
+cdc_pairs_new <- cbind(cdc_pairs_new, pred.piece)
+
+k.y <- k/365 
+
+#plot piecewise linear function
+piecelin <- ggplot(data = cdc_pairs_new, mapping = aes(x = IPmidtosample_interval.y, y = SNP.distance)) +
+  geom_point(color = "#E7B800", size = 1) +
+  #xlab("Transmission interval, days") +
+  #ylab("Pairwise SNP difference") +
+  geom_line(aes(y=fit), size =1, colour="black") +
+  coord_cartesian(xlim=c(0, 16), ylim=c(0, 14)) + 
+  scale_x_continuous(breaks=seq(0, 16, 2)) + 
+  geom_ribbon( aes(ymin = lwr, ymax = upr), alpha = 0.15) +
+  annotate("text", x=10, y=11, label= paste("R-squared=", (round(summ.piecelin$r.squared, 3)))) +
+  geom_vline(xintercept=k.y) +
+  annotate("text", x = 2.9, y=14, label = "274 days") +
+ theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid')) +
+  ggtitle("Piecewise linear") 
+  
+
+
+plots.all <- ggarrange(lin, piecelin, ncol=2, nrow=1,  labels = c("A", "B"))
+
+
+plots.all <- annotate_figure(plots.all, left = text_grob("Pairwise SNP difference", color = "black", rot = 90),
+                       bottom = text_grob("Modified case-pair interval, years", color = "black"))
+
+ggsave(plots.all, file='apfig1.pdf', width = 8, height = 4, units = "in",  dpi = 300)
+
+
+#####################
+# FIGURE 4
+#####################
+
+
+scat <- ggplot(data = cdc_pairs_new, mapping = aes(x = IPmidtosample_interval.y, y = SNP.distance)) +
+  geom_point(color = "#E7B800", size = 1) +
+  xlab("Modified case-pair interval, years") +
+  ylab("Pairwise SNP difference") +
+  coord_cartesian(ylim = c(0, 11.5), xlim = c(0,16)) +
+  scale_x_continuous(breaks=seq(0, 16, 2)) + 
+  scale_y_continuous(limits=c(0, 10))  +
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.title.x = element_text(colour = "black", margin = margin(t = 10, r = 10, b = 0, l = 0)),
+        axis.title.y = element_text(colour = "black", margin = margin(t = 10, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid'))
+
+ggsave(scat, file='scatter2a.pdf', width = 3, height = 2, units = "in",  dpi = 300)
+
+#cdc_pairs_new_box <- cdc_pairs_new[!is.na(cdc_pairs_new$less2yr),]
+
+box <- ggplot(data = cdc_pairs_new, aes(x = less2yr, y = SNP.distance)) +
+  geom_boxplot(width=0.3, outlier.shape = NA) +
+  geom_jitter(position=position_jitter(0.05), color = "#E7B800", alpha = 0.8) +
+  ylab("Pairwise SNP difference") +
+  scale_x_discrete(name ="Modified case-pair interval", labels=c("0" = "Less than 2 years", "1" = "Greater than 2 years")) +
+  annotate(geom="text", x=1, y=10.7, label="n = 38",
+              color="black") +
+  annotate(geom="text", x=2, y=10.7, label="n = 18",
+              color="black") +
+  coord_cartesian(ylim = c(0, 11.5)) +
+  theme(panel.background = element_rect(fill = "white", size = 0.5, linetype = "solid"),
+        axis.text=element_text(size=10), 
+        axis.title=element_text(size=10), 
+        axis.title.x = element_text(colour = "black", margin = margin(t = 10, r = 10, b = 0, l = 0)),
+        axis.title.y = element_text(colour = "black", margin = margin(t = 10, r = 10, b = 0, l = 0)),
+        axis.text.x = element_text(colour = "black", size = 10), 
+        axis.text.y = element_text(colour = "black", size = 10),
+        axis.line.x = element_line(colour = 'black', size=0.25, linetype='solid'),
+        axis.line.y = element_line(colour = 'black', size=0.25, linetype='solid'))
+
+ggsave(box, file='box2b.pdf', width = 3, height = 2, units = "in",  dpi = 300)
+
+plots.fig4 <- ggarrange(scat, box, ncol=2, labels = c("A", "B"))
+
+ggsave(plots.fig4, file='fig4.pdf', width = 8, height = 4, units = "in",  dpi = 300)
+
+```
+
